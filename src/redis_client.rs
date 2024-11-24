@@ -1,16 +1,15 @@
 #![allow(clippy::arithmetic_side_effects)]
 
-mod postgres_client_transaction;
+mod redis_client_transaction;
 
 /// A concurrent implementation for writing accounts into the PostgreSQL in parallel.
 use {
     crate::{
-        geyser_plugin_postgres::{GeyserPluginPostgresConfig, GeyserPluginPostgresError},
+        geyser_plugin_redis::{GeyserPluginPostgresConfig, GeyserPluginPostgresError},
     },
     crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender},
     log::*,
-    postgres::{Client, NoTls, Statement},
-    postgres_client_transaction::LogTransactionRequest,
+    redis_client_transaction::LogTransactionRequest,
     agave_geyser_plugin_interface::geyser_plugin_interface::GeyserPluginError,
     solana_measure::measure::Measure,
     solana_metrics::*,
@@ -22,20 +21,17 @@ use {
         thread::{self, sleep, Builder, JoinHandle},
         time::Duration,
     },
-    redis
+    redis,
 };
 
 /// The maximum asynchronous requests allowed in the channel to avoid excessive
 /// memory usage. The downside -- calls after this threshold is reached can get blocked.
 const MAX_ASYNC_REQUESTS: usize = 40960;
-const DEFAULT_POSTGRES_PORT: u16 = 5432;
 const DEFAULT_THREADS_COUNT: usize = 100;
 const DEFAULT_PANIC_ON_DB_ERROR: bool = false;
 
 struct PostgresSqlClientWrapper {
-    client: Client,
     redis: redis::Client,
-    update_transaction_log_stmt: Statement,
 }
 
 pub struct SimplePostgresClient {
@@ -70,59 +66,27 @@ pub trait PostgresClient {
         &mut self,
         transaction_log_info: LogTransactionRequest,
     ) -> Result<(), GeyserPluginError>;
-
 }
 
 impl SimplePostgresClient {
-    pub fn connect_to_db(config: &GeyserPluginPostgresConfig) -> Result<Client, GeyserPluginError> {
-        let port = config.port.unwrap_or(DEFAULT_POSTGRES_PORT);
-
+    pub fn connect_to_redis(config: &GeyserPluginPostgresConfig) -> Result<redis::Client, GeyserPluginError> {
         let connection_str = if let Some(connection_str) = &config.connection_str {
             connection_str.clone()
         } else {
-            if config.host.is_none() || config.user.is_none() {
-                let msg = format!(
-                    "\"connection_str\": {:?}, or \"host\": {:?} \"user\": {:?} must be specified",
-                    config.connection_str, config.host, config.user
-                );
-                return Err(GeyserPluginError::Custom(Box::new(
-                    GeyserPluginPostgresError::ConfigurationError { msg },
-                )));
-            }
-            format!(
-                "host={} user={} port={}",
-                config.host.as_ref().unwrap(),
-                config.user.as_ref().unwrap(),
-                port
-            )
+            let msg = String::from(
+                "No connection string",
+            );
+            return Err(GeyserPluginError::Custom(Box::new(
+                GeyserPluginPostgresError::ConfigurationError { msg },
+            )));
         };
-
-        let result = Client::connect(&connection_str, NoTls);
-
-        match result {
-            Err(err) => {
-                let msg = format!(
-                    "Error in connecting to the PostgreSQL database: {:?} connection_str: {:?}",
-                    err, connection_str
-                );
-                error!("{}", msg);
-                Err(GeyserPluginError::Custom(Box::new(
-                    GeyserPluginPostgresError::DataStoreConnectionError { msg },
-                )))
-            }
-            Ok(client) => Ok(client),
-        }
-    }
-
-    pub fn connect_to_redis(config: &GeyserPluginPostgresConfig) -> Result<redis::Client, GeyserPluginError> {
-        let connection_str = "redis://127.0.0.1";
         let result = redis::Client::open(connection_str);
 
         match result {
             Err(err) => {
                 let msg = format!(
-                    "Error in connecting to the Redis database: {:?} connection_str: {:?}",
-                    err, connection_str
+                    "Error in connecting to the Redis database: {:?}",
+                    err
                 );
                 error!("{}", msg);
                 Err(GeyserPluginError::Custom(Box::new(
@@ -135,24 +99,16 @@ impl SimplePostgresClient {
 
     pub fn new(config: &GeyserPluginPostgresConfig) -> Result<Self, GeyserPluginError> {
         info!("Creating SimplePostgresClient...");
-        let mut client = Self::connect_to_db(config)?;
-        let mut redis = Self::connect_to_redis(config)?;
-        let update_transaction_log_stmt =
-            Self::build_transaction_info_upsert_statement(&mut client, config)?;
+        let redis = Self::connect_to_redis(config)?;
 
         info!("Created SimplePostgresClient.");
         Ok(Self {
-            client: Mutex::new(PostgresSqlClientWrapper {
-                client,
-                redis,
-                update_transaction_log_stmt,
-            }),
+            client: Mutex::new(PostgresSqlClientWrapper { redis }),
         })
     }
 }
 
 impl PostgresClient for SimplePostgresClient {
-
     fn log_transaction(
         &mut self,
         transaction_log_info: LogTransactionRequest,

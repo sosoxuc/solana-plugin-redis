@@ -1,7 +1,7 @@
 /// Main entry for the PostgreSQL plugin
 use {
     crate::{
-        postgres_client::{ParallelPostgresClient, PostgresClientBuilder},
+        redis_client::{ParallelPostgresClient, PostgresClientBuilder},
         transaction_selector::TransactionSelector,
     },
     log::*,
@@ -31,36 +31,16 @@ impl std::fmt::Debug for GeyserPluginPostgres {
 /// The Configuration for the PostgreSQL plugin
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GeyserPluginPostgresConfig {
-    /// The host name or IP of the PostgreSQL server
-    pub host: Option<String>,
-
-    /// The user name of the PostgreSQL server.
-    pub user: Option<String>,
-
-    /// The port number of the PostgreSQL database, the default is 5432
-    pub port: Option<u16>,
-
     /// The connection string of PostgreSQL database, if this is set
-    /// `host`, `user` and `port` will be ignored.
     pub connection_str: Option<String>,
 
     /// Controls the number of threads establishing connections to
-    /// the PostgreSQL server. The default is 10.
+    /// the Redis server. The default is 10.
     pub threads: Option<usize>,
 
-
     /// Controls whether to panic the validator in case of errors
-    /// writing to PostgreSQL server. The default is false
+    /// writing to Redis server. The default is false
     pub panic_on_db_errors: Option<bool>,
-
-    /// Specify the path to PostgreSQL server's certificate file
-    pub server_ca: Option<String>,
-
-    /// Specify the path to the local client's certificate file
-    pub client_cert: Option<String>,
-
-    /// Specify the path to the local client's private PEM key file.
-    pub client_key: Option<String>,
 }
 
 #[derive(Error, Debug)]

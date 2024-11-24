@@ -1,9 +1,9 @@
 [package]
-authors = ["Solana Maintainers <maintainers@solana.foundation>"]
+authors = ["Ioseb"]
 edition = "2021"
-name = "solana-geyser-plugin-postgres"
-description = "The Solana AccountsDb plugin for PostgreSQL database."
-version = "1.17.3"
+name = "solana-geyser-plugin-redis"
+description = "The Solana plugin for Redis."
+version = "2.0.15"
 repository = "https://github.com/solana-labs/solana-accountsdb-plugin-postgres"
 license = "Apache-2.0"
 homepage = "https://solana.com/"
@@ -15,10 +15,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 bs58 = "0.5.1"
 bytemuck = "1.12.1"
-chrono = { version = "0.4.24", features = ["serde"] }
 crossbeam-channel = "0.5.7"
 log = "0.4.17"
-postgres = { version = "0.19.4", features = ["with-chrono-0_4"] }
 postgres-types = { version = "0.2.4", features = ["derive"] }
 serde = "1.0.145"
 serde_derive = "1.0.145"
@@ -31,7 +29,6 @@ solana-runtime = { version = "2.0.15" }
 solana-sdk = { version = "2.0.15" }
 solana-transaction-status = { version = "2.0.15" }
 thiserror = "2.0.3"
-tokio-postgres = "0.7.12"
 redis = { version = "0.27.5", features = ["tokio-comp", "connection-manager"] }
 
 [dev-dependencies]

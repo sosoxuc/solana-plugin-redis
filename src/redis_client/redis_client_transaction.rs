@@ -3,12 +3,9 @@ use redis::Commands;
 /// database.
 use {
     crate::{
-        geyser_plugin_postgres::{GeyserPluginPostgresConfig, GeyserPluginPostgresError},
-        postgres_client::{DbWorkItem, ParallelPostgresClient, SimplePostgresClient},
+        redis_client::{DbWorkItem, ParallelPostgresClient, SimplePostgresClient},
     },
-    chrono::Utc,
     log::*,
-    postgres::{Client, Statement},
     postgres_types::{FromSql, ToSql},
     agave_geyser_plugin_interface::geyser_plugin_interface::{
         GeyserPluginError, ReplicaTransactionInfoV2,
@@ -546,51 +543,17 @@ fn build_db_transaction(
 }
 
 impl SimplePostgresClient {
-    pub(crate) fn build_transaction_info_upsert_statement(
-        client: &mut Client,
-        config: &GeyserPluginPostgresConfig,
-    ) -> Result<Statement, GeyserPluginError> {
-        let stmt = "INSERT INTO transaction AS txn (signature, is_vote, slot, message_type, legacy_message, \
-        v0_loaded_message, signatures, message_hash, meta, write_version, index, updated_on) \
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
-        ON CONFLICT (slot, signature) DO UPDATE SET is_vote=excluded.is_vote, \
-        message_type=excluded.message_type, \
-        legacy_message=excluded.legacy_message, \
-        v0_loaded_message=excluded.v0_loaded_message, \
-        signatures=excluded.signatures, \
-        message_hash=excluded.message_hash, \
-        meta=excluded.meta, \
-        write_version=excluded.write_version, \
-        index=excluded.index,
-        updated_on=excluded.updated_on";
-
-        let stmt = client.prepare(stmt);
-
-        match stmt {
-            Err(err) => {
-                Err(GeyserPluginError::Custom(Box::new(GeyserPluginPostgresError::DataSchemaError {
-                    msg: format!(
-                        "Error in preparing for the transaction update PostgreSQL database: ({}) host: {:?} user: {:?} config: {:?}",
-                        err, config.host, config.user, config
-                    ),
-                })))
-            }
-            Ok(stmt) => Ok(stmt),
-        }
-    }
-
     pub(crate) fn log_transaction_impl(
         &mut self,
         transaction_log_info: LogTransactionRequest,
     ) -> Result<(), GeyserPluginError> {
         let client = self.client.get_mut().unwrap();
-        let statement = &client.update_transaction_log_stmt;
-        //let client = &mut client.client;
         let redis = &mut client.redis;
-        let updated_on = Utc::now().naive_utc();
+        //let updated_on = Utc::now().naive_utc();
 
         let transaction_info = transaction_log_info.transaction_info;
-        let result = redis.set::<String, String, String>(bs58::encode(transaction_info.signature).into_string(), String::from("1"));
+        let queue_name = String::from("solana:pools");
+        let result = redis.lpush::<String, String, String>(queue_name, bs58::encode(transaction_info.signature).into_string());
         if let Err(err) = result {
             let msg = format!(
                 "Failed to persist the update of transaction info to the Redis database. Error: {:?}",
