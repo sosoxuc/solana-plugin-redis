@@ -22,6 +22,7 @@ use {
         thread::{self, sleep, Builder, JoinHandle},
         time::Duration,
     },
+    redis
 };
 
 /// The maximum asynchronous requests allowed in the channel to avoid excessive
@@ -33,6 +34,7 @@ const DEFAULT_PANIC_ON_DB_ERROR: bool = false;
 
 struct PostgresSqlClientWrapper {
     client: Client,
+    redis: redis::Client,
     update_transaction_log_stmt: Statement,
 }
 
@@ -112,9 +114,29 @@ impl SimplePostgresClient {
         }
     }
 
+    pub fn connect_to_redis(config: &GeyserPluginPostgresConfig) -> Result<redis::Client, GeyserPluginError> {
+        let connection_str = "redis://127.0.0.1";
+        let result = redis::Client::open(connection_str);
+
+        match result {
+            Err(err) => {
+                let msg = format!(
+                    "Error in connecting to the Redis database: {:?} connection_str: {:?}",
+                    err, connection_str
+                );
+                error!("{}", msg);
+                Err(GeyserPluginError::Custom(Box::new(
+                    GeyserPluginPostgresError::DataStoreConnectionError { msg },
+                )))
+            }
+            Ok(client) => Ok(client),
+        }
+    }
+
     pub fn new(config: &GeyserPluginPostgresConfig) -> Result<Self, GeyserPluginError> {
         info!("Creating SimplePostgresClient...");
         let mut client = Self::connect_to_db(config)?;
+        let mut redis = Self::connect_to_redis(config)?;
         let update_transaction_log_stmt =
             Self::build_transaction_info_upsert_statement(&mut client, config)?;
 
@@ -122,6 +144,7 @@ impl SimplePostgresClient {
         Ok(Self {
             client: Mutex::new(PostgresSqlClientWrapper {
                 client,
+                redis,
                 update_transaction_log_stmt,
             }),
         })

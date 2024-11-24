@@ -1,3 +1,4 @@
+use redis::Commands;
 /// Module responsible for handling persisting transaction data to the PostgreSQL
 /// database.
 use {
@@ -584,31 +585,15 @@ impl SimplePostgresClient {
     ) -> Result<(), GeyserPluginError> {
         let client = self.client.get_mut().unwrap();
         let statement = &client.update_transaction_log_stmt;
-        let client = &mut client.client;
+        //let client = &mut client.client;
+        let redis = &mut client.redis;
         let updated_on = Utc::now().naive_utc();
 
         let transaction_info = transaction_log_info.transaction_info;
-        let result = client.query(
-            statement,
-            &[
-                &transaction_info.signature,
-                &transaction_info.is_vote,
-                &transaction_info.slot,
-                &transaction_info.message_type,
-                &transaction_info.legacy_message,
-                &transaction_info.v0_loaded_message,
-                &transaction_info.signatures,
-                &transaction_info.message_hash,
-                &transaction_info.meta,
-                &transaction_info.write_version,
-                &transaction_info.index,
-                &updated_on,
-            ],
-        );
-
+        let result = redis.set::<String, String, String>(bs58::encode(transaction_info.signature).into_string(), String::from("1"));
         if let Err(err) = result {
             let msg = format!(
-                "Failed to persist the update of transaction info to the PostgreSQL database. Error: {:?}",
+                "Failed to persist the update of transaction info to the Redis database. Error: {:?}",
                 err
             );
             error!("{}", msg);

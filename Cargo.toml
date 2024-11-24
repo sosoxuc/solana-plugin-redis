@@ -32,6 +32,7 @@ solana-sdk = { version = "2.0.15" }
 solana-transaction-status = { version = "2.0.15" }
 thiserror = "2.0.3"
 tokio-postgres = "0.7.12"
+redis = { version = "0.27.5", features = ["tokio-comp", "connection-manager"] }
 
 [dev-dependencies]
 libc = "0.2.134"
