@@ -8,8 +8,8 @@ use {
     serde_derive::{Deserialize, Serialize},
     serde_json,
     agave_geyser_plugin_interface::geyser_plugin_interface::{
-        GeyserPlugin, GeyserPluginError, ReplicaBlockInfoVersions,
-        ReplicaTransactionInfoVersions, Result, SlotStatus,
+        GeyserPlugin, GeyserPluginError,
+        ReplicaTransactionInfoVersions, Result,
     },
     std::{fs::File, io::Read},
     thiserror::Error,
@@ -206,31 +206,6 @@ impl GeyserPlugin for GeyserPluginPostgres {
         }
     }
 
-    fn update_slot_status(&self, slot: u64, parent: Option<u64>, status: SlotStatus) -> Result<()> {
-        info!("Updating slot {:?} at with status {:?}", slot, status);
-
-        match &self.client {
-            None => {
-                return Err(GeyserPluginError::Custom(Box::new(
-                    GeyserPluginPostgresError::DataStoreConnectionError {
-                        msg: "There is no connection to the PostgreSQL database.".to_string(),
-                    },
-                )));
-            }
-            Some(client) => {
-                let result = client.update_slot_status(slot, parent, status);
-
-                if let Err(err) = result {
-                    return Err(GeyserPluginError::SlotStatusUpdateError{
-                        msg: format!("Failed to persist the update of slot to the PostgreSQL database. Error: {:?}", err)
-                    });
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     fn notify_end_of_startup(&self) -> Result<()> {
         info!("Notifying the end of startup for accounts notifications");
         match &self.client {
@@ -289,46 +264,6 @@ impl GeyserPlugin for GeyserPluginPostgres {
                     }
                 }
                 _ => {
-                    return Err(GeyserPluginError::SlotStatusUpdateError{
-                        msg: "Failed to persist the transaction info to the PostgreSQL database. Unsupported format.".to_string()
-                    });
-                }
-            },
-        }
-
-        Ok(())
-    }
-
-    fn notify_block_metadata(&self, block_info: ReplicaBlockInfoVersions) -> Result<()> {
-        match &self.client {
-            None => {
-                return Err(GeyserPluginError::Custom(Box::new(
-                    GeyserPluginPostgresError::DataStoreConnectionError {
-                        msg: "There is no connection to the PostgreSQL database.".to_string(),
-                    },
-                )));
-            }
-            Some(client) => match block_info {
-                ReplicaBlockInfoVersions::V0_0_4(block_info) => {
-                    let result = client.update_block_metadata(block_info);
-
-                    if let Err(err) = result {
-                        return Err(GeyserPluginError::SlotStatusUpdateError{
-                                msg: format!("Failed to persist the update of block metadata to the PostgreSQL database. Error: {:?}", err)
-                            });
-                    }
-                }
-                ReplicaBlockInfoVersions::V0_0_3(_block_info) => {
-                    return Err(GeyserPluginError::SlotStatusUpdateError{
-                        msg: "Failed to persist the transaction info to the PostgreSQL database. Unsupported format.".to_string()
-                    });
-                }
-                ReplicaBlockInfoVersions::V0_0_2(_block_info) => {
-                    return Err(GeyserPluginError::SlotStatusUpdateError{
-                        msg: "Failed to persist the transaction info to the PostgreSQL database. Unsupported format.".to_string()
-                    });
-                }
-                ReplicaBlockInfoVersions::V0_0_1(_) => {
                     return Err(GeyserPluginError::SlotStatusUpdateError{
                         msg: "Failed to persist the transaction info to the PostgreSQL database. Unsupported format.".to_string()
                     });
