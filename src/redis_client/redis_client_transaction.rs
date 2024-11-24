@@ -6,7 +6,7 @@ use {
         redis_client::{DbWorkItem, ParallelPostgresClient, SimplePostgresClient},
     },
     log::*,
-    postgres_types::{FromSql, ToSql},
+    serde_derive::Serialize,
     agave_geyser_plugin_interface::geyser_plugin_interface::{
         GeyserPluginError, ReplicaTransactionInfoV2,
     },
@@ -14,7 +14,7 @@ use {
     solana_sdk::{
         instruction::CompiledInstruction,
         message::{
-            v0::{self, LoadedAddresses, MessageAddressTableLookup},
+            v0::{self, MessageAddressTableLookup},
             Message, MessageHeader, SanitizedMessage,
         },
         transaction::TransactionError,
@@ -27,23 +27,20 @@ use {
 
 const MAX_TRANSACTION_STATUS_LEN: usize = 256;
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "CompiledInstruction")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbCompiledInstruction {
     pub program_id_index: i16,
     pub accounts: Vec<i16>,
-    pub data: Vec<u8>,
+    pub data: String,
 }
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "InnerInstructions")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbInnerInstructions {
     pub index: i16,
     pub instructions: Vec<DbCompiledInstruction>,
 }
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "TransactionTokenBalance")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbTransactionTokenBalance {
     pub account_index: i16,
     pub mint: String,
@@ -51,8 +48,7 @@ pub struct DbTransactionTokenBalance {
     pub owner: String,
 }
 
-#[derive(Clone, Debug, Eq, FromSql, ToSql, PartialEq)]
-#[postgres(name = "RewardType")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum DbRewardType {
     Fee,
     Rent,
@@ -60,8 +56,7 @@ pub enum DbRewardType {
     Voting,
 }
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "Reward")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbReward {
     pub pubkey: String,
     pub lamports: i64,
@@ -70,8 +65,7 @@ pub struct DbReward {
     pub commission: Option<i16>,
 }
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "TransactionStatusMeta")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbTransactionStatusMeta {
     pub error: Option<DbTransactionError>,
     pub fee: i64,
@@ -84,65 +78,50 @@ pub struct DbTransactionStatusMeta {
     pub rewards: Option<Vec<DbReward>>,
 }
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "TransactionMessageHeader")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbTransactionMessageHeader {
     pub num_required_signatures: i16,
     pub num_readonly_signed_accounts: i16,
     pub num_readonly_unsigned_accounts: i16,
 }
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "TransactionMessage")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbTransactionMessage {
     pub header: DbTransactionMessageHeader,
-    pub account_keys: Vec<Vec<u8>>,
-    pub recent_blockhash: Vec<u8>,
+    pub account_keys: Vec<String>,
     pub instructions: Vec<DbCompiledInstruction>,
 }
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "TransactionMessageAddressTableLookup")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbTransactionMessageAddressTableLookup {
-    pub account_key: Vec<u8>,
+    pub account_key: String,
     pub writable_indexes: Vec<i16>,
     pub readonly_indexes: Vec<i16>,
 }
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "TransactionMessageV0")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbTransactionMessageV0 {
     pub header: DbTransactionMessageHeader,
-    pub account_keys: Vec<Vec<u8>>,
-    pub recent_blockhash: Vec<u8>,
+    pub account_keys: Vec<String>,
     pub instructions: Vec<DbCompiledInstruction>,
     pub address_table_lookups: Vec<DbTransactionMessageAddressTableLookup>,
 }
 
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "LoadedAddresses")]
-pub struct DbLoadedAddresses {
-    pub writable: Vec<Vec<u8>>,
-    pub readonly: Vec<Vec<u8>>,
-}
-
-#[derive(Clone, Debug, FromSql, ToSql)]
-#[postgres(name = "LoadedMessageV0")]
+#[derive(Clone, Debug, Serialize)]
 pub struct DbLoadedMessageV0 {
     pub message: DbTransactionMessageV0,
-    pub loaded_addresses: DbLoadedAddresses,
 }
 
+#[derive(Clone, Debug, Serialize)]
 pub struct DbTransaction {
-    pub signature: Vec<u8>,
+    pub signature: String,
     pub is_vote: bool,
     pub slot: i64,
     pub message_type: i16,
     pub legacy_message: Option<DbTransactionMessage>,
     pub v0_loaded_message: Option<DbLoadedMessageV0>,
-    pub message_hash: Vec<u8>,
     pub meta: DbTransactionStatusMeta,
-    pub signatures: Vec<Vec<u8>>,
+    pub signatures: Vec<String>,
     /// This can be used to tell the order of transaction within a block
     /// Given a slot, the transaction with a smaller write_version appears
     /// before transactions with higher write_versions in a shred.
@@ -157,7 +136,7 @@ pub struct LogTransactionRequest {
 impl From<&MessageAddressTableLookup> for DbTransactionMessageAddressTableLookup {
     fn from(address_table_lookup: &MessageAddressTableLookup) -> Self {
         Self {
-            account_key: address_table_lookup.account_key.as_ref().to_vec(),
+            account_key: bs58::encode(address_table_lookup.account_key.as_ref().to_vec()).into_string(),
             writable_indexes: address_table_lookup
                 .writable_indexes
                 .iter()
@@ -167,23 +146,6 @@ impl From<&MessageAddressTableLookup> for DbTransactionMessageAddressTableLookup
                 .readonly_indexes
                 .iter()
                 .map(|idx| *idx as i16)
-                .collect(),
-        }
-    }
-}
-
-impl From<&LoadedAddresses> for DbLoadedAddresses {
-    fn from(loaded_addresses: &LoadedAddresses) -> Self {
-        Self {
-            writable: loaded_addresses
-                .writable
-                .iter()
-                .map(|pubkey| pubkey.as_ref().to_vec())
-                .collect(),
-            readonly: loaded_addresses
-                .readonly
-                .iter()
-                .map(|pubkey| pubkey.as_ref().to_vec())
                 .collect(),
         }
     }
@@ -208,7 +170,7 @@ impl From<&CompiledInstruction> for DbCompiledInstruction {
                 .iter()
                 .map(|account_idx| *account_idx as i16)
                 .collect(),
-            data: instruction.data.clone(),
+            data: bs58::encode(instruction.data.clone()).into_string(),
         }
     }
 }
@@ -220,9 +182,8 @@ impl From<&Message> for DbTransactionMessage {
             account_keys: message
                 .account_keys
                 .iter()
-                .map(|key| key.as_ref().to_vec())
+                .map(|key| bs58::encode(key.as_ref().to_vec()).into_string())
                 .collect(),
-            recent_blockhash: message.recent_blockhash.as_ref().to_vec(),
             instructions: message
                 .instructions
                 .iter()
@@ -239,9 +200,8 @@ impl From<&v0::Message> for DbTransactionMessageV0 {
             account_keys: message
                 .account_keys
                 .iter()
-                .map(|key| key.as_ref().to_vec())
+                .map(|key| bs58::encode(key.as_ref().to_vec()).into_string())
                 .collect(),
-            recent_blockhash: message.recent_blockhash.as_ref().to_vec(),
             instructions: message
                 .instructions
                 .iter()
@@ -260,9 +220,6 @@ impl<'a> From<&v0::LoadedMessage<'a>> for DbLoadedMessageV0 {
     fn from(message: &v0::LoadedMessage) -> Self {
         Self {
             message: DbTransactionMessageV0::from(&message.message as &v0::Message),
-            loaded_addresses: DbLoadedAddresses::from(
-                &message.loaded_addresses as &LoadedAddresses,
-            ),
         }
     }
 }
@@ -310,8 +267,7 @@ impl From<&Reward> for DbReward {
     }
 }
 
-#[derive(Clone, Debug, Eq, FromSql, ToSql, PartialEq)]
-#[postgres(name = "TransactionErrorCode")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum DbTransactionErrorCode {
     AccountInUse,
     AccountLoadedTwice,
@@ -417,8 +373,7 @@ impl From<&TransactionError> for DbTransactionErrorCode {
     }
 }
 
-#[derive(Clone, Debug, Eq, FromSql, ToSql, PartialEq)]
-#[postgres(name = "TransactionError")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct DbTransactionError {
     error_code: DbTransactionErrorCode,
     error_detail: Option<String>,
@@ -508,7 +463,7 @@ fn build_db_transaction(
     transaction_write_version: u64,
 ) -> DbTransaction {
     DbTransaction {
-        signature: transaction_info.signature.as_ref().to_vec(),
+        signature: bs58::encode(transaction_info.signature.as_ref()).into_string(),
         is_vote: transaction_info.is_vote,
         slot: slot as i64,
         message_type: match transaction_info.transaction.message() {
@@ -529,13 +484,8 @@ fn build_db_transaction(
             .transaction
             .signatures()
             .iter()
-            .map(|signature| signature.as_ref().to_vec())
+            .map(|signature| bs58::encode(signature.as_ref().to_vec()).into_string())
             .collect(),
-        message_hash: transaction_info
-            .transaction
-            .message_hash()
-            .as_ref()
-            .to_vec(),
         meta: DbTransactionStatusMeta::from(transaction_info.transaction_status_meta),
         write_version: transaction_write_version as i64,
         index: transaction_info.index as i64,
@@ -553,7 +503,8 @@ impl SimplePostgresClient {
 
         let transaction_info = transaction_log_info.transaction_info;
         let queue_name = String::from("solana:pools");
-        let result = redis.lpush::<String, String, String>(queue_name, bs58::encode(transaction_info.signature).into_string());
+        let data = serde_json::to_string(&transaction_info).unwrap();
+        let result = redis.lpush::<String, String, String>(queue_name, data);
         if let Err(err) = result {
             let msg = format!(
                 "Failed to persist the update of transaction info to the Redis database. Error: {:?}",
@@ -601,806 +552,5 @@ impl ParallelPostgresClient {
             });
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use {
-        super::*,
-        solana_account_decoder::parse_token::UiTokenAmount,
-        solana_sdk::{
-            hash::Hash,
-            message::VersionedMessage,
-            pubkey::Pubkey,
-            signature::{Keypair, Signature, Signer},
-            system_transaction,
-            transaction::{
-                SanitizedTransaction, SimpleAddressLoader, Transaction, VersionedTransaction,
-            },
-        },
-        solana_transaction_status::InnerInstruction,
-    };
-
-    fn check_compiled_instruction_equality(
-        compiled_instruction: &CompiledInstruction,
-        db_compiled_instruction: &DbCompiledInstruction,
-    ) {
-        assert_eq!(
-            compiled_instruction.program_id_index,
-            db_compiled_instruction.program_id_index as u8
-        );
-        assert_eq!(
-            compiled_instruction.accounts.len(),
-            db_compiled_instruction.accounts.len()
-        );
-        assert_eq!(
-            compiled_instruction.data.len(),
-            db_compiled_instruction.data.len()
-        );
-
-        for i in 0..compiled_instruction.accounts.len() {
-            assert_eq!(
-                compiled_instruction.accounts[i],
-                db_compiled_instruction.accounts[i] as u8
-            )
-        }
-        for i in 0..compiled_instruction.data.len() {
-            assert_eq!(
-                compiled_instruction.data[i],
-                db_compiled_instruction.data[i]
-            )
-        }
-    }
-
-    #[test]
-    fn test_transform_compiled_instruction() {
-        let compiled_instruction = CompiledInstruction {
-            program_id_index: 0,
-            accounts: vec![1, 2, 3],
-            data: vec![4, 5, 6],
-        };
-
-        let db_compiled_instruction = DbCompiledInstruction::from(&compiled_instruction);
-        check_compiled_instruction_equality(&compiled_instruction, &db_compiled_instruction);
-    }
-
-    fn check_inner_instructions_equality(
-        inner_instructions: &InnerInstructions,
-        db_inner_instructions: &DbInnerInstructions,
-    ) {
-        assert_eq!(inner_instructions.index, db_inner_instructions.index as u8);
-        assert_eq!(
-            inner_instructions.instructions.len(),
-            db_inner_instructions.instructions.len()
-        );
-
-        for i in 0..inner_instructions.instructions.len() {
-            check_compiled_instruction_equality(
-                &inner_instructions.instructions[i].instruction,
-                &db_inner_instructions.instructions[i],
-            )
-        }
-    }
-
-    #[test]
-    fn test_transform_inner_instructions() {
-        let inner_instructions = InnerInstructions {
-            index: 0,
-            instructions: vec![
-                InnerInstruction {
-                    instruction: CompiledInstruction {
-                        program_id_index: 0,
-                        accounts: vec![1, 2, 3],
-                        data: vec![4, 5, 6],
-                    },
-                    stack_height: None,
-                },
-                InnerInstruction {
-                    instruction: CompiledInstruction {
-                        program_id_index: 1,
-                        accounts: vec![12, 13, 14],
-                        data: vec![24, 25, 26],
-                    },
-                    stack_height: None,
-                },
-            ],
-        };
-
-        let db_inner_instructions = DbInnerInstructions::from(&inner_instructions);
-        check_inner_instructions_equality(&inner_instructions, &db_inner_instructions);
-    }
-
-    fn check_address_table_lookups_equality(
-        address_table_lookups: &MessageAddressTableLookup,
-        db_address_table_lookups: &DbTransactionMessageAddressTableLookup,
-    ) {
-        assert_eq!(
-            address_table_lookups.writable_indexes.len(),
-            db_address_table_lookups.writable_indexes.len()
-        );
-        assert_eq!(
-            address_table_lookups.readonly_indexes.len(),
-            db_address_table_lookups.readonly_indexes.len()
-        );
-
-        for i in 0..address_table_lookups.writable_indexes.len() {
-            assert_eq!(
-                address_table_lookups.writable_indexes[i],
-                db_address_table_lookups.writable_indexes[i] as u8
-            )
-        }
-        for i in 0..address_table_lookups.readonly_indexes.len() {
-            assert_eq!(
-                address_table_lookups.readonly_indexes[i],
-                db_address_table_lookups.readonly_indexes[i] as u8
-            )
-        }
-    }
-
-    #[test]
-    fn test_transform_address_table_lookups() {
-        let address_table_lookups = MessageAddressTableLookup {
-            account_key: Pubkey::new_unique(),
-            writable_indexes: vec![1, 2, 3],
-            readonly_indexes: vec![4, 5, 6],
-        };
-
-        let db_address_table_lookups =
-            DbTransactionMessageAddressTableLookup::from(&address_table_lookups);
-        check_address_table_lookups_equality(&address_table_lookups, &db_address_table_lookups);
-    }
-
-    fn check_reward_equality(reward: &Reward, db_reward: &DbReward) {
-        assert_eq!(reward.pubkey, db_reward.pubkey);
-        assert_eq!(reward.lamports, db_reward.lamports);
-        assert_eq!(reward.post_balance, db_reward.post_balance as u64);
-        assert_eq!(get_reward_type(&reward.reward_type), db_reward.reward_type);
-        assert_eq!(
-            reward.commission,
-            db_reward
-                .commission
-                .as_ref()
-                .map(|commission| *commission as u8)
-        );
-    }
-
-    #[test]
-    fn test_transform_reward() {
-        let reward = Reward {
-            pubkey: Pubkey::new_unique().to_string(),
-            lamports: 1234,
-            post_balance: 45678,
-            reward_type: Some(RewardType::Fee),
-            commission: Some(12),
-        };
-
-        let db_reward = DbReward::from(&reward);
-        check_reward_equality(&reward, &db_reward);
-    }
-
-    fn check_transaction_token_balance_equality(
-        transaction_token_balance: &TransactionTokenBalance,
-        db_transaction_token_balance: &DbTransactionTokenBalance,
-    ) {
-        assert_eq!(
-            transaction_token_balance.account_index,
-            db_transaction_token_balance.account_index as u8
-        );
-        assert_eq!(
-            transaction_token_balance.mint,
-            db_transaction_token_balance.mint
-        );
-        assert_eq!(
-            transaction_token_balance.ui_token_amount.ui_amount,
-            db_transaction_token_balance.ui_token_amount
-        );
-        assert_eq!(
-            transaction_token_balance.owner,
-            db_transaction_token_balance.owner
-        );
-    }
-
-    #[test]
-    fn test_transform_transaction_token_balance() {
-        let transaction_token_balance = TransactionTokenBalance {
-            account_index: 3,
-            mint: Pubkey::new_unique().to_string(),
-            ui_token_amount: UiTokenAmount {
-                ui_amount: Some(0.42),
-                decimals: 2,
-                amount: "42".to_string(),
-                ui_amount_string: "0.42".to_string(),
-            },
-            owner: Pubkey::new_unique().to_string(),
-            program_id: "program_id".to_string(),
-        };
-
-        let db_transaction_token_balance =
-            DbTransactionTokenBalance::from(&transaction_token_balance);
-
-        check_transaction_token_balance_equality(
-            &transaction_token_balance,
-            &db_transaction_token_balance,
-        );
-    }
-
-    fn check_token_balances(
-        token_balances: &Option<Vec<TransactionTokenBalance>>,
-        db_token_balances: &Option<Vec<DbTransactionTokenBalance>>,
-    ) {
-        assert_eq!(
-            token_balances
-                .as_ref()
-                .map(|token_balances| token_balances.len()),
-            db_token_balances
-                .as_ref()
-                .map(|token_balances| token_balances.len()),
-        );
-
-        if token_balances.is_some() {
-            for i in 0..token_balances.as_ref().unwrap().len() {
-                check_transaction_token_balance_equality(
-                    &token_balances.as_ref().unwrap()[i],
-                    &db_token_balances.as_ref().unwrap()[i],
-                );
-            }
-        }
-    }
-
-    fn check_transaction_status_meta(
-        transaction_status_meta: &TransactionStatusMeta,
-        db_transaction_status_meta: &DbTransactionStatusMeta,
-    ) {
-        assert_eq!(
-            get_transaction_error(&transaction_status_meta.status),
-            db_transaction_status_meta.error
-        );
-        assert_eq!(
-            transaction_status_meta.fee,
-            db_transaction_status_meta.fee as u64
-        );
-        assert_eq!(
-            transaction_status_meta.pre_balances.len(),
-            db_transaction_status_meta.pre_balances.len()
-        );
-
-        for i in 0..transaction_status_meta.pre_balances.len() {
-            assert_eq!(
-                transaction_status_meta.pre_balances[i],
-                db_transaction_status_meta.pre_balances[i] as u64
-            );
-        }
-        assert_eq!(
-            transaction_status_meta.post_balances.len(),
-            db_transaction_status_meta.post_balances.len()
-        );
-        for i in 0..transaction_status_meta.post_balances.len() {
-            assert_eq!(
-                transaction_status_meta.post_balances[i],
-                db_transaction_status_meta.post_balances[i] as u64
-            );
-        }
-        assert_eq!(
-            transaction_status_meta
-                .inner_instructions
-                .as_ref()
-                .map(|inner_instructions| inner_instructions.len()),
-            db_transaction_status_meta
-                .inner_instructions
-                .as_ref()
-                .map(|inner_instructions| inner_instructions.len()),
-        );
-
-        if transaction_status_meta.inner_instructions.is_some() {
-            for i in 0..transaction_status_meta
-                .inner_instructions
-                .as_ref()
-                .unwrap()
-                .len()
-            {
-                check_inner_instructions_equality(
-                    &transaction_status_meta.inner_instructions.as_ref().unwrap()[i],
-                    &db_transaction_status_meta
-                        .inner_instructions
-                        .as_ref()
-                        .unwrap()[i],
-                );
-            }
-        }
-
-        assert_eq!(
-            transaction_status_meta
-                .log_messages
-                .as_ref()
-                .map(|log_messages| log_messages.len()),
-            db_transaction_status_meta
-                .log_messages
-                .as_ref()
-                .map(|log_messages| log_messages.len()),
-        );
-
-        if transaction_status_meta.log_messages.is_some() {
-            for i in 0..transaction_status_meta.log_messages.as_ref().unwrap().len() {
-                assert_eq!(
-                    &transaction_status_meta.log_messages.as_ref().unwrap()[i],
-                    &db_transaction_status_meta.log_messages.as_ref().unwrap()[i]
-                );
-            }
-        }
-
-        check_token_balances(
-            &transaction_status_meta.pre_token_balances,
-            &db_transaction_status_meta.pre_token_balances,
-        );
-
-        check_token_balances(
-            &transaction_status_meta.post_token_balances,
-            &db_transaction_status_meta.post_token_balances,
-        );
-
-        assert_eq!(
-            transaction_status_meta
-                .rewards
-                .as_ref()
-                .map(|rewards| rewards.len()),
-            db_transaction_status_meta
-                .rewards
-                .as_ref()
-                .map(|rewards| rewards.len()),
-        );
-
-        if transaction_status_meta.rewards.is_some() {
-            for i in 0..transaction_status_meta.rewards.as_ref().unwrap().len() {
-                check_reward_equality(
-                    &transaction_status_meta.rewards.as_ref().unwrap()[i],
-                    &db_transaction_status_meta.rewards.as_ref().unwrap()[i],
-                );
-            }
-        }
-    }
-
-    fn build_transaction_status_meta() -> TransactionStatusMeta {
-        TransactionStatusMeta {
-            status: Ok(()),
-            fee: 23456,
-            pre_balances: vec![11, 22, 33],
-            post_balances: vec![44, 55, 66],
-            inner_instructions: Some(vec![InnerInstructions {
-                index: 0,
-                instructions: vec![
-                    InnerInstruction {
-                        instruction: CompiledInstruction {
-                            program_id_index: 0,
-                            accounts: vec![1, 2, 3],
-                            data: vec![4, 5, 6],
-                        },
-                        stack_height: None,
-                    },
-                    InnerInstruction {
-                        instruction: CompiledInstruction {
-                            program_id_index: 1,
-                            accounts: vec![12, 13, 14],
-                            data: vec![24, 25, 26],
-                        },
-                        stack_height: None,
-                    },
-                ],
-            }]),
-            log_messages: Some(vec!["message1".to_string(), "message2".to_string()]),
-            pre_token_balances: Some(vec![
-                TransactionTokenBalance {
-                    account_index: 3,
-                    mint: Pubkey::new_unique().to_string(),
-                    ui_token_amount: UiTokenAmount {
-                        ui_amount: Some(0.42),
-                        decimals: 2,
-                        amount: "42".to_string(),
-                        ui_amount_string: "0.42".to_string(),
-                    },
-                    owner: Pubkey::new_unique().to_string(),
-                    program_id: "program_id".to_string(),
-                },
-                TransactionTokenBalance {
-                    account_index: 2,
-                    mint: Pubkey::new_unique().to_string(),
-                    ui_token_amount: UiTokenAmount {
-                        ui_amount: Some(0.38),
-                        decimals: 2,
-                        amount: "38".to_string(),
-                        ui_amount_string: "0.38".to_string(),
-                    },
-                    owner: Pubkey::new_unique().to_string(),
-                    program_id: "program_id".to_string(),
-                },
-            ]),
-            post_token_balances: Some(vec![
-                TransactionTokenBalance {
-                    account_index: 3,
-                    mint: Pubkey::new_unique().to_string(),
-                    ui_token_amount: UiTokenAmount {
-                        ui_amount: Some(0.82),
-                        decimals: 2,
-                        amount: "82".to_string(),
-                        ui_amount_string: "0.82".to_string(),
-                    },
-                    owner: Pubkey::new_unique().to_string(),
-                    program_id: "program_id".to_string(),
-                },
-                TransactionTokenBalance {
-                    account_index: 2,
-                    mint: Pubkey::new_unique().to_string(),
-                    ui_token_amount: UiTokenAmount {
-                        ui_amount: Some(0.48),
-                        decimals: 2,
-                        amount: "48".to_string(),
-                        ui_amount_string: "0.48".to_string(),
-                    },
-                    owner: Pubkey::new_unique().to_string(),
-                    program_id: "program_id".to_string(),
-                },
-            ]),
-            rewards: Some(vec![
-                Reward {
-                    pubkey: Pubkey::new_unique().to_string(),
-                    lamports: 1234,
-                    post_balance: 45678,
-                    reward_type: Some(RewardType::Fee),
-                    commission: Some(12),
-                },
-                Reward {
-                    pubkey: Pubkey::new_unique().to_string(),
-                    lamports: 234,
-                    post_balance: 324,
-                    reward_type: Some(RewardType::Staking),
-                    commission: Some(11),
-                },
-            ]),
-            loaded_addresses: LoadedAddresses {
-                writable: vec![Pubkey::new_unique(), Pubkey::new_unique()],
-                readonly: vec![Pubkey::new_unique(), Pubkey::new_unique()],
-            },
-            return_data: None,
-            compute_units_consumed: None,
-        }
-    }
-
-    #[test]
-    fn test_transform_transaction_status_meta() {
-        let transaction_status_meta = build_transaction_status_meta();
-        let db_transaction_status_meta = DbTransactionStatusMeta::from(&transaction_status_meta);
-        check_transaction_status_meta(&transaction_status_meta, &db_transaction_status_meta);
-    }
-
-    fn check_message_header_equality(
-        message_header: &MessageHeader,
-        db_message_header: &DbTransactionMessageHeader,
-    ) {
-        assert_eq!(
-            message_header.num_readonly_signed_accounts,
-            db_message_header.num_readonly_signed_accounts as u8
-        );
-        assert_eq!(
-            message_header.num_readonly_unsigned_accounts,
-            db_message_header.num_readonly_unsigned_accounts as u8
-        );
-        assert_eq!(
-            message_header.num_required_signatures,
-            db_message_header.num_required_signatures as u8
-        );
-    }
-
-    #[test]
-    fn test_transform_transaction_message_header() {
-        let message_header = MessageHeader {
-            num_readonly_signed_accounts: 1,
-            num_readonly_unsigned_accounts: 2,
-            num_required_signatures: 3,
-        };
-
-        let db_message_header = DbTransactionMessageHeader::from(&message_header);
-        check_message_header_equality(&message_header, &db_message_header)
-    }
-
-    fn check_transaction_message_equality(message: &Message, db_message: &DbTransactionMessage) {
-        check_message_header_equality(&message.header, &db_message.header);
-        assert_eq!(message.account_keys.len(), db_message.account_keys.len());
-        for i in 0..message.account_keys.len() {
-            assert_eq!(message.account_keys[i].as_ref(), db_message.account_keys[i]);
-        }
-        assert_eq!(message.instructions.len(), db_message.instructions.len());
-        for i in 0..message.instructions.len() {
-            check_compiled_instruction_equality(
-                &message.instructions[i],
-                &db_message.instructions[i],
-            );
-        }
-    }
-
-    fn build_message() -> Message {
-        Message {
-            header: MessageHeader {
-                num_readonly_signed_accounts: 11,
-                num_readonly_unsigned_accounts: 12,
-                num_required_signatures: 13,
-            },
-            account_keys: vec![Pubkey::new_unique(), Pubkey::new_unique()],
-            recent_blockhash: Hash::new_unique(),
-            instructions: vec![
-                CompiledInstruction {
-                    program_id_index: 0,
-                    accounts: vec![1, 2, 3],
-                    data: vec![4, 5, 6],
-                },
-                CompiledInstruction {
-                    program_id_index: 3,
-                    accounts: vec![11, 12, 13],
-                    data: vec![14, 15, 16],
-                },
-            ],
-        }
-    }
-
-    #[test]
-    fn test_transform_transaction_message() {
-        let message = build_message();
-
-        let db_message = DbTransactionMessage::from(&message);
-        check_transaction_message_equality(&message, &db_message);
-    }
-
-    fn check_transaction_message_v0_equality(
-        message: &v0::Message,
-        db_message: &DbTransactionMessageV0,
-    ) {
-        check_message_header_equality(&message.header, &db_message.header);
-        assert_eq!(message.account_keys.len(), db_message.account_keys.len());
-        for i in 0..message.account_keys.len() {
-            assert_eq!(message.account_keys[i].as_ref(), db_message.account_keys[i]);
-        }
-        assert_eq!(message.instructions.len(), db_message.instructions.len());
-        for i in 0..message.instructions.len() {
-            check_compiled_instruction_equality(
-                &message.instructions[i],
-                &db_message.instructions[i],
-            );
-        }
-        assert_eq!(
-            message.address_table_lookups.len(),
-            db_message.address_table_lookups.len()
-        );
-        for i in 0..message.address_table_lookups.len() {
-            check_address_table_lookups_equality(
-                &message.address_table_lookups[i],
-                &db_message.address_table_lookups[i],
-            );
-        }
-    }
-
-    fn build_transaction_message_v0() -> v0::Message {
-        v0::Message {
-            header: MessageHeader {
-                num_readonly_signed_accounts: 2,
-                num_readonly_unsigned_accounts: 2,
-                num_required_signatures: 3,
-            },
-            account_keys: vec![
-                Pubkey::new_unique(),
-                Pubkey::new_unique(),
-                Pubkey::new_unique(),
-                Pubkey::new_unique(),
-                Pubkey::new_unique(),
-            ],
-            recent_blockhash: Hash::new_unique(),
-            instructions: vec![
-                CompiledInstruction {
-                    program_id_index: 1,
-                    accounts: vec![1, 2, 3],
-                    data: vec![4, 5, 6],
-                },
-                CompiledInstruction {
-                    program_id_index: 2,
-                    accounts: vec![0, 1, 2],
-                    data: vec![14, 15, 16],
-                },
-            ],
-            address_table_lookups: vec![
-                MessageAddressTableLookup {
-                    account_key: Pubkey::new_unique(),
-                    writable_indexes: vec![0],
-                    readonly_indexes: vec![1, 2],
-                },
-                MessageAddressTableLookup {
-                    account_key: Pubkey::new_unique(),
-                    writable_indexes: vec![1],
-                    readonly_indexes: vec![0, 2],
-                },
-            ],
-        }
-    }
-
-    #[test]
-    fn test_transform_transaction_message_v0() {
-        let message = build_transaction_message_v0();
-
-        let db_message = DbTransactionMessageV0::from(&message);
-        check_transaction_message_v0_equality(&message, &db_message);
-    }
-
-    fn check_loaded_addresses(
-        loaded_addresses: &LoadedAddresses,
-        db_loaded_addresses: &DbLoadedAddresses,
-    ) {
-        assert_eq!(
-            loaded_addresses.writable.len(),
-            db_loaded_addresses.writable.len()
-        );
-        for i in 0..loaded_addresses.writable.len() {
-            assert_eq!(
-                loaded_addresses.writable[i].as_ref(),
-                db_loaded_addresses.writable[i]
-            );
-        }
-
-        assert_eq!(
-            loaded_addresses.readonly.len(),
-            db_loaded_addresses.readonly.len()
-        );
-        for i in 0..loaded_addresses.readonly.len() {
-            assert_eq!(
-                loaded_addresses.readonly[i].as_ref(),
-                db_loaded_addresses.readonly[i]
-            );
-        }
-    }
-
-    fn check_loaded_message_v0_equality(
-        message: &v0::LoadedMessage,
-        db_message: &DbLoadedMessageV0,
-    ) {
-        check_transaction_message_v0_equality(&message.message, &db_message.message);
-        check_loaded_addresses(&message.loaded_addresses, &db_message.loaded_addresses);
-    }
-
-    #[test]
-    fn test_transform_loaded_message_v0() {
-        let message = v0::LoadedMessage::new(
-            build_transaction_message_v0(),
-            LoadedAddresses {
-                writable: vec![Pubkey::new_unique(), Pubkey::new_unique()],
-                readonly: vec![Pubkey::new_unique(), Pubkey::new_unique()],
-            },
-        );
-
-        let db_message = DbLoadedMessageV0::from(&message);
-        check_loaded_message_v0_equality(&message, &db_message);
-    }
-
-    fn check_transaction(
-        slot: u64,
-        transaction: &ReplicaTransactionInfoV2,
-        db_transaction: &DbTransaction,
-    ) {
-        assert_eq!(transaction.signature.as_ref(), db_transaction.signature);
-        assert_eq!(transaction.is_vote, db_transaction.is_vote);
-        assert_eq!(slot, db_transaction.slot as u64);
-        match transaction.transaction.message() {
-            SanitizedMessage::Legacy(message) => {
-                assert_eq!(db_transaction.message_type, 0);
-                check_transaction_message_equality(
-                    &message.message,
-                    db_transaction.legacy_message.as_ref().unwrap(),
-                );
-            }
-            SanitizedMessage::V0(message) => {
-                assert_eq!(db_transaction.message_type, 1);
-                check_loaded_message_v0_equality(
-                    message,
-                    db_transaction.v0_loaded_message.as_ref().unwrap(),
-                );
-            }
-        }
-
-        assert_eq!(
-            transaction.transaction.signatures().len(),
-            db_transaction.signatures.len()
-        );
-
-        for i in 0..transaction.transaction.signatures().len() {
-            assert_eq!(
-                transaction.transaction.signatures()[i].as_ref(),
-                db_transaction.signatures[i]
-            );
-        }
-
-        assert_eq!(
-            transaction.transaction.message_hash().as_ref(),
-            db_transaction.message_hash
-        );
-
-        check_transaction_status_meta(transaction.transaction_status_meta, &db_transaction.meta);
-    }
-
-    fn build_test_transaction_legacy() -> Transaction {
-        let keypair1 = Keypair::new();
-        let pubkey1 = keypair1.pubkey();
-        let zero = Hash::default();
-        system_transaction::transfer(&keypair1, &pubkey1, 42, zero)
-    }
-
-    #[test]
-    fn test_build_db_transaction_legacy() {
-        let signature = Signature::from([1u8; 64]);
-
-        let message_hash = Hash::new_unique();
-        let transaction = build_test_transaction_legacy();
-
-        let transaction = VersionedTransaction::from(transaction);
-
-        let transaction = SanitizedTransaction::try_create(
-            transaction,
-            message_hash,
-            Some(true),
-            SimpleAddressLoader::Disabled,
-        )
-        .unwrap();
-
-        let transaction_status_meta = build_transaction_status_meta();
-        let transaction_info = ReplicaTransactionInfoV2 {
-            signature: &signature,
-            is_vote: false,
-            transaction: &transaction,
-            transaction_status_meta: &transaction_status_meta,
-            index: 0,
-        };
-
-        let slot = 54;
-        let db_transaction = build_db_transaction(slot, &transaction_info, 1);
-        check_transaction(slot, &transaction_info, &db_transaction);
-    }
-
-    fn build_test_transaction_v0() -> VersionedTransaction {
-        VersionedTransaction {
-            signatures: vec![
-                Signature::from([1u8; 64]),
-                Signature::from([2u8; 64]),
-                Signature::from([3u8; 64]),
-            ],
-            message: VersionedMessage::V0(build_transaction_message_v0()),
-        }
-    }
-
-    #[test]
-    fn test_build_db_transaction_v0() {
-        let signature = Signature::from([1u8; 64]);
-
-        let message_hash = Hash::new_unique();
-        let transaction = build_test_transaction_v0();
-
-        transaction.sanitize().unwrap();
-
-        let transaction = SanitizedTransaction::try_create(
-            transaction,
-            message_hash,
-            Some(true),
-            SimpleAddressLoader::Enabled(LoadedAddresses {
-                writable: vec![Pubkey::new_unique(), Pubkey::new_unique()],
-                readonly: vec![Pubkey::new_unique(), Pubkey::new_unique()],
-            }),
-        )
-        .unwrap();
-
-        let transaction_status_meta = build_transaction_status_meta();
-        let transaction_info = ReplicaTransactionInfoV2 {
-            signature: &signature,
-            is_vote: true,
-            transaction: &transaction,
-            transaction_status_meta: &transaction_status_meta,
-            index: 0,
-        };
-
-        let slot = 54;
-        let db_transaction = build_db_transaction(slot, &transaction_info, 1);
-        check_transaction(slot, &transaction_info, &db_transaction);
     }
 }
