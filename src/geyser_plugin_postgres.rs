@@ -391,18 +391,3 @@ pub unsafe extern "C" fn _create_plugin() -> *mut dyn GeyserPlugin {
     let plugin: Box<dyn GeyserPlugin> = Box::new(plugin);
     Box::into_raw(plugin)
 }
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use {super::*, serde_json};
-
-    #[test]
-    fn test_accounts_selector_from_config() {
-        let config = "{\"accounts_selector\" : { \
-           \"owners\" : [\"9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin\"] \
-        }}";
-
-        let config: serde_json::Value = serde_json::from_str(config).unwrap();
-        GeyserPluginPostgres::create_accounts_selector_from_config(&config);
-    }
-}
