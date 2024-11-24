@@ -72,12 +72,6 @@ pub struct GeyserPluginPostgresConfig {
     /// Specify the path to the local client's private PEM key file.
     pub client_key: Option<String>,
 
-    /// Controls whether to index the token owners. The default is false
-    pub index_token_owner: Option<bool>,
-
-    /// Controls whetherf to index the token mints. The default is false
-    pub index_token_mint: Option<bool>,
-
     /// Controls if this plugin can read the database on_load() to find heighest slot
     /// and ignore upsetr accounts (at_startup) that should already exist in DB
     #[serde(default)]
@@ -187,10 +181,10 @@ impl GeyserPlugin for GeyserPluginPostgres {
                 }
             })?;
 
-        let (client, batch_optimize_by_skiping_older_slots) =
-            PostgresClientBuilder::build_pararallel_postgres_client(&config)?;
+        let (client, batch_optimize_by_skipping_older_slots) =
+            PostgresClientBuilder::build_parallel_postgres_client(&config)?;
         self.client = Some(client);
-        self.batch_starting_slot = batch_optimize_by_skiping_older_slots;
+        self.batch_starting_slot = batch_optimize_by_skipping_older_slots;
 
         Ok(())
     }
