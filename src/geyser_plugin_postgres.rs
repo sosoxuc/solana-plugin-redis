@@ -48,20 +48,10 @@ pub struct GeyserPluginPostgresConfig {
     /// the PostgreSQL server. The default is 10.
     pub threads: Option<usize>,
 
-    /// Controls the batch size when bulk loading accounts.
-    /// The default is 10.
-    pub batch_size: Option<usize>,
 
     /// Controls whether to panic the validator in case of errors
     /// writing to PostgreSQL server. The default is false
     pub panic_on_db_errors: Option<bool>,
-
-    /// Indicates whether to store historical data for accounts
-    pub store_account_historical_data: Option<bool>,
-
-    /// Controls whether to use SSL based connection to the database server.
-    /// The default is false
-    pub use_ssl: Option<bool>,
 
     /// Specify the path to PostgreSQL server's certificate file
     pub server_ca: Option<String>,
@@ -71,11 +61,6 @@ pub struct GeyserPluginPostgresConfig {
 
     /// Specify the path to the local client's private PEM key file.
     pub client_key: Option<String>,
-
-    /// Controls if this plugin can read the database on_load() to find heighest slot
-    /// and ignore upsetr accounts (at_startup) that should already exist in DB
-    #[serde(default)]
-    pub skip_upsert_existing_accounts_at_startup: bool,
 }
 
 #[derive(Error, Debug)]
@@ -88,9 +73,6 @@ pub enum GeyserPluginPostgresError {
 
     #[error("Error preparing data store schema. Error message: ({msg})")]
     ConfigurationError { msg: String },
-
-    #[error("Replica account V0.0.1 not supported anymore")]
-    ReplicaAccountV001NotSupported,
 }
 
 impl GeyserPlugin for GeyserPluginPostgres {
