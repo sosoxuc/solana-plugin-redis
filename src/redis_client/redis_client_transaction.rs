@@ -48,23 +48,6 @@ pub struct DbTransactionTokenBalance {
     pub owner: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum DbRewardType {
-    Fee,
-    Rent,
-    Staking,
-    Voting,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DbReward {
-    pub pubkey: String,
-    pub lamports: i64,
-    pub post_balance: i64,
-    pub reward_type: Option<DbRewardType>,
-    pub commission: Option<i16>,
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub struct DbTransactionStatusMeta {
     pub error: Option<DbTransactionError>,
@@ -75,90 +58,28 @@ pub struct DbTransactionStatusMeta {
     pub log_messages: Option<Vec<String>>,
     pub pre_token_balances: Option<Vec<DbTransactionTokenBalance>>,
     pub post_token_balances: Option<Vec<DbTransactionTokenBalance>>,
-    pub rewards: Option<Vec<DbReward>>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DbTransactionMessageHeader {
-    pub num_required_signatures: i16,
-    pub num_readonly_signed_accounts: i16,
-    pub num_readonly_unsigned_accounts: i16,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DbTransactionMessage {
-    pub header: DbTransactionMessageHeader,
     pub account_keys: Vec<String>,
     pub instructions: Vec<DbCompiledInstruction>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DbTransactionMessageAddressTableLookup {
-    pub account_key: String,
-    pub writable_indexes: Vec<i16>,
-    pub readonly_indexes: Vec<i16>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DbTransactionMessageV0 {
-    pub header: DbTransactionMessageHeader,
-    pub account_keys: Vec<String>,
-    pub instructions: Vec<DbCompiledInstruction>,
-    pub address_table_lookups: Vec<DbTransactionMessageAddressTableLookup>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DbLoadedMessageV0 {
-    pub message: DbTransactionMessageV0,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DbTransaction {
     pub signature: String,
-    pub is_vote: bool,
+    pub block_time: u64,
     pub slot: i64,
-    pub message_type: i16,
-    pub legacy_message: Option<DbTransactionMessage>,
-    pub v0_loaded_message: Option<DbLoadedMessageV0>,
+    pub message: Option<DbTransactionMessage>,
     pub meta: DbTransactionStatusMeta,
     pub signatures: Vec<String>,
-    /// This can be used to tell the order of transaction within a block
-    /// Given a slot, the transaction with a smaller write_version appears
-    /// before transactions with higher write_versions in a shred.
     pub write_version: i64,
     pub index: i64,
 }
 
 pub struct LogTransactionRequest {
     pub transaction_info: DbTransaction,
-}
-
-impl From<&MessageAddressTableLookup> for DbTransactionMessageAddressTableLookup {
-    fn from(address_table_lookup: &MessageAddressTableLookup) -> Self {
-        Self {
-            account_key: bs58::encode(address_table_lookup.account_key.as_ref().to_vec()).into_string(),
-            writable_indexes: address_table_lookup
-                .writable_indexes
-                .iter()
-                .map(|idx| *idx as i16)
-                .collect(),
-            readonly_indexes: address_table_lookup
-                .readonly_indexes
-                .iter()
-                .map(|idx| *idx as i16)
-                .collect(),
-        }
-    }
-}
-
-impl From<&MessageHeader> for DbTransactionMessageHeader {
-    fn from(header: &MessageHeader) -> Self {
-        Self {
-            num_required_signatures: header.num_required_signatures as i16,
-            num_readonly_signed_accounts: header.num_readonly_signed_accounts as i16,
-            num_readonly_unsigned_accounts: header.num_readonly_unsigned_accounts as i16,
-        }
-    }
 }
 
 impl From<&CompiledInstruction> for DbCompiledInstruction {
@@ -178,7 +99,6 @@ impl From<&CompiledInstruction> for DbCompiledInstruction {
 impl From<&Message> for DbTransactionMessage {
     fn from(message: &Message) -> Self {
         Self {
-            header: DbTransactionMessageHeader::from(&message.header),
             account_keys: message
                 .account_keys
                 .iter()
@@ -193,10 +113,9 @@ impl From<&Message> for DbTransactionMessage {
     }
 }
 
-impl From<&v0::Message> for DbTransactionMessageV0 {
+impl From<&v0::Message> for DbTransactionMessage {
     fn from(message: &v0::Message) -> Self {
         Self {
-            header: DbTransactionMessageHeader::from(&message.header),
             account_keys: message
                 .account_keys
                 .iter()
@@ -207,19 +126,7 @@ impl From<&v0::Message> for DbTransactionMessageV0 {
                 .iter()
                 .map(DbCompiledInstruction::from)
                 .collect(),
-            address_table_lookups: message
-                .address_table_lookups
-                .iter()
-                .map(DbTransactionMessageAddressTableLookup::from)
-                .collect(),
-        }
-    }
-}
 
-impl<'a> From<&v0::LoadedMessage<'a>> for DbLoadedMessageV0 {
-    fn from(message: &v0::LoadedMessage) -> Self {
-        Self {
-            message: DbTransactionMessageV0::from(&message.message as &v0::Message),
         }
     }
 }
@@ -233,36 +140,6 @@ impl From<&InnerInstructions> for DbInnerInstructions {
                 .iter()
                 .map(|instruction| DbCompiledInstruction::from(&instruction.instruction))
                 .collect(),
-        }
-    }
-}
-
-impl From<&RewardType> for DbRewardType {
-    fn from(reward_type: &RewardType) -> Self {
-        match reward_type {
-            RewardType::Fee => Self::Fee,
-            RewardType::Rent => Self::Rent,
-            RewardType::Staking => Self::Staking,
-            RewardType::Voting => Self::Voting,
-        }
-    }
-}
-
-fn get_reward_type(reward: &Option<RewardType>) -> Option<DbRewardType> {
-    reward.as_ref().map(DbRewardType::from)
-}
-
-impl From<&Reward> for DbReward {
-    fn from(reward: &Reward) -> Self {
-        Self {
-            pubkey: reward.pubkey.clone(),
-            lamports: reward.lamports,
-            post_balance: reward.post_balance as i64,
-            reward_type: get_reward_type(&reward.reward_type),
-            commission: reward
-                .commission
-                .as_ref()
-                .map(|commission| *commission as i16),
         }
     }
 }
@@ -449,10 +326,10 @@ impl From<&TransactionStatusMeta> for DbTransactionStatusMeta {
                     .map(DbTransactionTokenBalance::from)
                     .collect()
             }),
-            rewards: meta
-                .rewards
-                .as_ref()
-                .map(|rewards| rewards.iter().map(DbReward::from).collect()),
+            // rewards: meta
+            //     .rewards
+            //     .as_ref()
+            //     .map(|rewards| rewards.iter().map(DbReward::from).collect()),
         }
     }
 }
@@ -464,21 +341,17 @@ fn build_db_transaction(
 ) -> DbTransaction {
     DbTransaction {
         signature: bs58::encode(transaction_info.signature.as_ref()).into_string(),
-        is_vote: transaction_info.is_vote,
+        //is_vote: transaction_info.is_vote,
         slot: slot as i64,
-        message_type: match transaction_info.transaction.message() {
-            SanitizedMessage::Legacy(_) => 0,
-            SanitizedMessage::V0(_) => 1,
-        },
-        legacy_message: match transaction_info.transaction.message() {
+        // message_type: match transaction_info.transaction.message() {
+        //     SanitizedMessage::Legacy(_) => 0,
+        //     SanitizedMessage::V0(_) => 1,
+        // },
+        message: match transaction_info.transaction.message() {
             SanitizedMessage::Legacy(legacy_message) => {
                 Some(DbTransactionMessage::from(legacy_message.message.as_ref()))
             }
-            _ => None,
-        },
-        v0_loaded_message: match transaction_info.transaction.message() {
-            SanitizedMessage::V0(loaded_message) => Some(DbLoadedMessageV0::from(loaded_message)),
-            _ => None,
+            SanitizedMessage::V0(loaded_message) => Some(DbTransactionMessage::from(loaded_message))
         },
         signatures: transaction_info
             .transaction
@@ -489,6 +362,7 @@ fn build_db_transaction(
         meta: DbTransactionStatusMeta::from(transaction_info.transaction_status_meta),
         write_version: transaction_write_version as i64,
         index: transaction_info.index as i64,
+        block_time: std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()
     }
 }
 
