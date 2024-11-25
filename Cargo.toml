@@ -3,7 +3,7 @@ authors = ["Ioseb"]
 edition = "2021"
 name = "solana-geyser-plugin-redis"
 description = "The Solana plugin for Redis."
-version = "2.0.15"
+version = "2.1.1"
 repository = "https://github.com/solana-labs/solana-accountsdb-plugin-postgres"
 license = "Apache-2.0"
 homepage = "https://solana.com/"
@@ -20,13 +20,13 @@ log = "0.4.17"
 serde = "1.0.145"
 serde_derive = "1.0.145"
 serde_json = "1.0.85"
-agave-geyser-plugin-interface = "=2.0.15"
-solana-logger = { version = "2.0.15" }
-solana-measure = { version = "2.0.15" }
-solana-metrics = { version = "2.0.15" }
-solana-runtime = { version = "2.0.15" }
-solana-sdk = { version = "2.0.15" }
-solana-transaction-status = { version = "2.0.15" }
+agave-geyser-plugin-interface = "=2.1.1"
+solana-logger = { version = "2.1.1" }
+solana-measure = { version = "2.1.1" }
+solana-metrics = { version = "2.1.1" }
+solana-runtime = { version = "2.1.1" }
+solana-sdk = { version = "2.1.1" }
+solana-transaction-status = { version = "2.1.1" }
 thiserror = "2.0.3"
 redis = { version = "0.27.5", features = ["tokio-comp", "connection-manager"] }
 
@@ -36,11 +36,11 @@ libloading = "0.8.5"
 serial_test = "3.2.0"
 socket2 = { version = "0.5.7", features = ["all"] }
 
-solana-account-decoder = { version = "2.0.15" }
-solana-core = { version = "2.0.15" }
-solana-local-cluster = { version = "2.0.15" }
-solana-net-utils = { version = "2.0.15" }
-solana-streamer = { version = "2.0.15" }
+solana-account-decoder = { version = "2.1.1" }
+solana-core = { version = "2.1.1" }
+solana-local-cluster = { version = "2.1.1" }
+solana-net-utils = { version = "2.1.1" }
+solana-streamer = { version = "2.1.1" }
 tempfile = "3.3.0"
 
 [package.metadata.docs.rs]
