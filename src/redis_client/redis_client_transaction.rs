@@ -351,7 +351,9 @@ fn build_db_transaction(
             SanitizedMessage::Legacy(legacy_message) => {
                 Some(DbTransactionMessage::from(legacy_message.message.as_ref()))
             }
-            SanitizedMessage::V0(loaded_message) => Some(DbTransactionMessage::from(loaded_message))
+            SanitizedMessage::V0(loaded_message) => {
+                Some(DbTransactionMessage::from(loaded_message.message.as_ref()))
+            }
         },
         signatures: transaction_info
             .transaction
@@ -362,7 +364,7 @@ fn build_db_transaction(
         meta: DbTransactionStatusMeta::from(transaction_info.transaction_status_meta),
         write_version: transaction_write_version as i64,
         index: transaction_info.index as i64,
-        block_time: std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()
+        block_time: std::time::UNIX_EPOCH.elapsed().unwrap().as_secs(),
     }
 }
 
