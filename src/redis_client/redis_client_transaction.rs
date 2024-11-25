@@ -10,18 +10,12 @@ use {
     agave_geyser_plugin_interface::geyser_plugin_interface::{
         GeyserPluginError, ReplicaTransactionInfoV2,
     },
-    solana_runtime::bank::RewardType,
     solana_sdk::{
         instruction::CompiledInstruction,
-        message::{
-            v0::{self, MessageAddressTableLookup},
-            Message, MessageHeader, SanitizedMessage,
-        },
+        message::{v0::{self}, Message, SanitizedMessage},
         transaction::TransactionError,
     },
-    solana_transaction_status::{
-        InnerInstructions, Reward, TransactionStatusMeta, TransactionTokenBalance,
-    },
+    solana_transaction_status::{InnerInstructions, TransactionStatusMeta, TransactionTokenBalance},
     std::sync::atomic::Ordering,
 };
 
