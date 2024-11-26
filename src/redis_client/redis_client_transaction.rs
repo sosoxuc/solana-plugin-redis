@@ -40,6 +40,9 @@ pub struct DbTransactionTokenBalance {
     pub mint: String,
     pub ui_token_amount: Option<f64>,
     pub owner: String,
+    pub decimals: u8,
+    pub amount: String,
+    pub ui_amount_string: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -283,6 +286,9 @@ impl From<&TransactionTokenBalance> for DbTransactionTokenBalance {
             account_index: token_balance.account_index as i16,
             mint: token_balance.mint.clone(),
             ui_token_amount: token_balance.ui_token_amount.ui_amount,
+            decimals: token_balance.ui_token_amount.decimals,
+            amount: token_balance.ui_token_amount.amount.clone(),
+            ui_amount_string: token_balance.ui_token_amount.ui_amount_string.clone(),
             owner: token_balance.owner.clone(),
         }
     }
