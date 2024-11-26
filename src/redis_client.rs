@@ -2,7 +2,7 @@
 
 mod redis_client_transaction;
 
-/// A concurrent implementation for writing accounts into the PostgreSQL in parallel.
+/// A concurrent implementation for writing transactions into the Redis in parallel.
 use {
     crate::{
         geyser_plugin_redis::{GeyserPluginRedisConfig, GeyserPluginRedisError},
