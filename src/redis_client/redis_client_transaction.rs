@@ -1,9 +1,7 @@
 use redis::Commands;
-/// Module responsible for handling persisting transaction data to the PostgreSQL
-/// database.
 use {
     crate::{
-        redis_client::{DbWorkItem, ParallelPostgresClient, SimplePostgresClient},
+        redis_client::{DbWorkItem, ParallelRedisClient, SimpleRedisClient},
     },
     log::*,
     serde_derive::Serialize,
@@ -12,7 +10,7 @@ use {
     },
     solana_sdk::{
         instruction::CompiledInstruction,
-        message::{v0::{self}, Message, SanitizedMessage},
+        message::{v0::{self, MessageAddressTableLookup}, Message, SanitizedMessage},
         transaction::TransactionError,
     },
     solana_transaction_status::{InnerInstructions, TransactionStatusMeta, TransactionTokenBalance},
@@ -20,6 +18,13 @@ use {
 };
 
 const MAX_TRANSACTION_STATUS_LEN: usize = 256;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct DbTransactionMessageAddressTableLookup {
+    pub account_key: String,
+    pub writable_indexes: Vec<i16>,
+    pub readonly_indexes: Vec<i16>,
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DbCompiledInstruction {
@@ -61,6 +66,8 @@ pub struct DbTransactionStatusMeta {
 pub struct DbTransactionMessage {
     pub account_keys: Vec<String>,
     pub instructions: Vec<DbCompiledInstruction>,
+    pub recent_blockhash: String,
+    pub address_table_lookups: Option<Vec<DbTransactionMessageAddressTableLookup>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -70,13 +77,31 @@ pub struct DbTransaction {
     pub slot: i64,
     pub message: Option<DbTransactionMessage>,
     pub meta: DbTransactionStatusMeta,
-    pub signatures: Vec<String>,
     pub write_version: i64,
     pub index: i64,
+    pub message_type: u8,
 }
 
 pub struct LogTransactionRequest {
     pub transaction_info: DbTransaction,
+}
+
+impl From<&MessageAddressTableLookup> for DbTransactionMessageAddressTableLookup {
+    fn from(address_table_lookup: &MessageAddressTableLookup) -> Self {
+        Self {
+            account_key: bs58::encode(address_table_lookup.account_key.as_ref().to_vec()).into_string(),
+            writable_indexes: address_table_lookup
+                .writable_indexes
+                .iter()
+                .map(|idx| *idx as i16)
+                .collect(),
+            readonly_indexes: address_table_lookup
+                .readonly_indexes
+                .iter()
+                .map(|idx| *idx as i16)
+                .collect(),
+        }
+    }
 }
 
 impl From<&CompiledInstruction> for DbCompiledInstruction {
@@ -101,11 +126,13 @@ impl From<&Message> for DbTransactionMessage {
                 .iter()
                 .map(|key| bs58::encode(key.as_ref().to_vec()).into_string())
                 .collect(),
+            recent_blockhash: bs58::encode(message.recent_blockhash.as_ref().to_vec()).into_string(),
             instructions: message
                 .instructions
                 .iter()
                 .map(DbCompiledInstruction::from)
                 .collect(),
+            address_table_lookups: None
         }
     }
 }
@@ -118,12 +145,17 @@ impl From<&v0::Message> for DbTransactionMessage {
                 .iter()
                 .map(|key| bs58::encode(key.as_ref().to_vec()).into_string())
                 .collect(),
+            recent_blockhash: bs58::encode(message.recent_blockhash.as_ref().to_vec()).into_string(),
             instructions: message
                 .instructions
                 .iter()
                 .map(DbCompiledInstruction::from)
                 .collect(),
-
+            address_table_lookups: Some(message
+                .address_table_lookups
+                .iter()
+                .map(DbTransactionMessageAddressTableLookup::from)
+                .collect()),
         }
     }
 }
@@ -326,10 +358,6 @@ impl From<&TransactionStatusMeta> for DbTransactionStatusMeta {
                     .map(DbTransactionTokenBalance::from)
                     .collect()
             }),
-            // rewards: meta
-            //     .rewards
-            //     .as_ref()
-            //     .map(|rewards| rewards.iter().map(DbReward::from).collect()),
         }
     }
 }
@@ -341,12 +369,11 @@ fn build_db_transaction(
 ) -> DbTransaction {
     DbTransaction {
         signature: bs58::encode(transaction_info.signature.as_ref()).into_string(),
-        //is_vote: transaction_info.is_vote,
         slot: slot as i64,
-        // message_type: match transaction_info.transaction.message() {
-        //     SanitizedMessage::Legacy(_) => 0,
-        //     SanitizedMessage::V0(_) => 1,
-        // },
+        message_type: match transaction_info.transaction.message() {
+             SanitizedMessage::Legacy(_) => 0,
+             SanitizedMessage::V0(_) => 1,
+        },
         message: match transaction_info.transaction.message() {
             SanitizedMessage::Legacy(legacy_message) => {
                 Some(DbTransactionMessage::from(legacy_message.message.as_ref()))
@@ -355,12 +382,6 @@ fn build_db_transaction(
                 Some(DbTransactionMessage::from(loaded_message.message.as_ref()))
             }
         },
-        signatures: transaction_info
-            .transaction
-            .signatures()
-            .iter()
-            .map(|signature| bs58::encode(signature.as_ref().to_vec()).into_string())
-            .collect(),
         meta: DbTransactionStatusMeta::from(transaction_info.transaction_status_meta),
         write_version: transaction_write_version as i64,
         index: transaction_info.index as i64,
@@ -368,7 +389,7 @@ fn build_db_transaction(
     }
 }
 
-impl SimplePostgresClient {
+impl SimpleRedisClient {
     pub(crate) fn log_transaction_impl(
         &mut self,
         transaction_log_info: LogTransactionRequest,
@@ -394,7 +415,7 @@ impl SimplePostgresClient {
     }
 }
 
-impl ParallelPostgresClient {
+impl ParallelRedisClient {
     fn build_transaction_request(
         slot: u64,
         transaction_info: &ReplicaTransactionInfoV2,

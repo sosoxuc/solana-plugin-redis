@@ -5,7 +5,7 @@ mod redis_client_transaction;
 /// A concurrent implementation for writing accounts into the PostgreSQL in parallel.
 use {
     crate::{
-        geyser_plugin_redis::{GeyserPluginPostgresConfig, GeyserPluginPostgresError},
+        geyser_plugin_redis::{GeyserPluginRedisConfig, GeyserPluginRedisError},
     },
     crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender},
     log::*,
@@ -30,16 +30,16 @@ const MAX_ASYNC_REQUESTS: usize = 40960;
 const DEFAULT_THREADS_COUNT: usize = 100;
 const DEFAULT_PANIC_ON_DB_ERROR: bool = false;
 
-struct PostgresSqlClientWrapper {
+struct RedisClientWrapper {
     redis: redis::Client,
 }
 
-pub struct SimplePostgresClient {
-    client: Mutex<PostgresSqlClientWrapper>,
+pub struct SimpleRedisClient {
+    client: Mutex<RedisClientWrapper>,
 }
 
-struct PostgresClientWorker {
-    client: SimplePostgresClient,
+struct RedisClientWorker {
+    client: SimpleRedisClient,
     /// Indicating if accounts notification during startup is done.
     is_startup_done: bool,
 }
@@ -57,7 +57,7 @@ pub(crate) fn abort() -> ! {
     panic!("process::exit(1) is intercepted for friendly test failure...");
 }
 
-pub trait PostgresClient {
+pub trait RedisClient {
     fn join(&mut self) -> thread::Result<()> {
         Ok(())
     }
@@ -68,8 +68,8 @@ pub trait PostgresClient {
     ) -> Result<(), GeyserPluginError>;
 }
 
-impl SimplePostgresClient {
-    pub fn connect_to_redis(config: &GeyserPluginPostgresConfig) -> Result<redis::Client, GeyserPluginError> {
+impl SimpleRedisClient {
+    pub fn connect_to_redis(config: &GeyserPluginRedisConfig) -> Result<redis::Client, GeyserPluginError> {
         let connection_str = if let Some(connection_str) = &config.connection_str {
             connection_str.clone()
         } else {
@@ -77,7 +77,7 @@ impl SimplePostgresClient {
                 "No connection string",
             );
             return Err(GeyserPluginError::Custom(Box::new(
-                GeyserPluginPostgresError::ConfigurationError { msg },
+                GeyserPluginRedisError::ConfigurationError { msg },
             )));
         };
         let result = redis::Client::open(connection_str);
@@ -90,25 +90,25 @@ impl SimplePostgresClient {
                 );
                 error!("{}", msg);
                 Err(GeyserPluginError::Custom(Box::new(
-                    GeyserPluginPostgresError::DataStoreConnectionError { msg },
+                    GeyserPluginRedisError::DataStoreConnectionError { msg },
                 )))
             }
             Ok(client) => Ok(client),
         }
     }
 
-    pub fn new(config: &GeyserPluginPostgresConfig) -> Result<Self, GeyserPluginError> {
-        info!("Creating SimplePostgresClient...");
+    pub fn new(config: &GeyserPluginRedisConfig) -> Result<Self, GeyserPluginError> {
+        info!("Creating SimpleRedisClient...");
         let redis = Self::connect_to_redis(config)?;
 
-        info!("Created SimplePostgresClient.");
+        info!("Created SimpleRedisClient.");
         Ok(Self {
-            client: Mutex::new(PostgresSqlClientWrapper { redis }),
+            client: Mutex::new(RedisClientWrapper { redis }),
         })
     }
 }
 
-impl PostgresClient for SimplePostgresClient {
+impl RedisClient for SimpleRedisClient {
     fn log_transaction(
         &mut self,
         transaction_log_info: LogTransactionRequest,
@@ -122,16 +122,16 @@ enum DbWorkItem {
     LogTransaction(Box<LogTransactionRequest>),
 }
 
-impl PostgresClientWorker {
-    fn new(config: GeyserPluginPostgresConfig) -> Result<Self, GeyserPluginError> {
-        let result = SimplePostgresClient::new(&config);
+impl RedisClientWorker {
+    fn new(config: GeyserPluginRedisConfig) -> Result<Self, GeyserPluginError> {
+        let result = SimpleRedisClient::new(&config);
         match result {
-            Ok(client) => Ok(PostgresClientWorker {
+            Ok(client) => Ok(RedisClientWorker {
                 client,
                 is_startup_done: false,
             }),
             Err(err) => {
-                error!("Error in creating SimplePostgresClient: {}", err);
+                error!("Error in creating SimpleRedisClient: {}", err);
                 Err(err)
             }
         }
@@ -146,11 +146,11 @@ impl PostgresClientWorker {
         panic_on_db_errors: bool,
     ) -> Result<(), GeyserPluginError> {
         while !exit_worker.load(Ordering::Relaxed) {
-            let mut measure = Measure::start("geyser-plugin-postgres-worker-recv");
+            let mut measure = Measure::start("geyser-plugin-redis-worker-recv");
             let work = receiver.recv_timeout(Duration::from_millis(500));
             measure.stop();
             inc_new_counter_debug!(
-                "geyser-plugin-postgres-worker-recv-us",
+                "geyser-plugin-redis-worker-recv-us",
                 measure.as_us() as usize,
                 100000,
                 100000
@@ -188,7 +188,7 @@ impl PostgresClientWorker {
         Ok(())
     }
 }
-pub struct ParallelPostgresClient {
+pub struct ParallelRedisClient {
     workers: Vec<JoinHandle<Result<(), GeyserPluginError>>>,
     exit_worker: Arc<AtomicBool>,
     is_startup_done: Arc<AtomicBool>,
@@ -198,9 +198,9 @@ pub struct ParallelPostgresClient {
     transaction_write_version: AtomicU64,
 }
 
-impl ParallelPostgresClient {
-    pub fn new(config: &GeyserPluginPostgresConfig) -> Result<Self, GeyserPluginError> {
-        info!("Creating ParallelPostgresClient...");
+impl ParallelRedisClient {
+    pub fn new(config: &GeyserPluginRedisConfig) -> Result<Self, GeyserPluginError> {
+        info!("Creating ParallelRedisClient...");
         let (sender, receiver) = bounded(MAX_ASYNC_REQUESTS);
         let exit_worker = Arc::new(AtomicBool::new(false));
         let mut workers = Vec::default();
@@ -222,7 +222,7 @@ impl ParallelPostgresClient {
                         .panic_on_db_errors
                         .as_ref()
                         .unwrap_or(&DEFAULT_PANIC_ON_DB_ERROR);
-                    let result = PostgresClientWorker::new(config);
+                    let result = RedisClientWorker::new(config);
 
                     match result {
                         Ok(mut worker) => {
@@ -250,7 +250,7 @@ impl ParallelPostgresClient {
             workers.push(worker);
         }
 
-        info!("Created ParallelPostgresClient.");
+        info!("Created ParallelRedisClient.");
         Ok(Self {
             workers,
             exit_worker,
@@ -305,12 +305,12 @@ impl ParallelPostgresClient {
     }
 }
 
-pub struct PostgresClientBuilder {}
+pub struct RedisClientBuilder {}
 
-impl PostgresClientBuilder {
-    pub fn build_parallel_postgres_client(
-        config: &GeyserPluginPostgresConfig,
-    ) -> Result<(ParallelPostgresClient, Option<u64>), GeyserPluginError> {
-        ParallelPostgresClient::new(config).map(|v| (v, None))
+impl RedisClientBuilder {
+    pub fn build_parallel_redis_client(
+        config: &GeyserPluginRedisConfig,
+    ) -> Result<(ParallelRedisClient, Option<u64>), GeyserPluginError> {
+        ParallelRedisClient::new(config).map(|v| (v, None))
     }
 }

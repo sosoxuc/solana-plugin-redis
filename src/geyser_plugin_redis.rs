@@ -1,7 +1,7 @@
-/// Main entry for the PostgreSQL plugin
+/// Main entry for the Redis plugin
 use {
     crate::{
-        redis_client::{ParallelPostgresClient, PostgresClientBuilder},
+        redis_client::{ParallelRedisClient, RedisClientBuilder},
         transaction_selector::TransactionSelector,
     },
     log::*,
@@ -16,22 +16,22 @@ use {
 };
 
 #[derive(Default)]
-pub struct GeyserPluginPostgres {
-    client: Option<ParallelPostgresClient>,
+pub struct GeyserPluginRedis {
+    client: Option<ParallelRedisClient>,
     transaction_selector: Option<TransactionSelector>,
     batch_starting_slot: Option<u64>,
 }
 
-impl std::fmt::Debug for GeyserPluginPostgres {
+impl std::fmt::Debug for GeyserPluginRedis {
     fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Ok(())
     }
 }
 
-/// The Configuration for the PostgreSQL plugin
+/// The Configuration for the Redis plugin
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct GeyserPluginPostgresConfig {
-    /// The connection string of PostgreSQL database, if this is set
+pub struct GeyserPluginRedisConfig {
+    /// The connection string of Redis database, if this is set
     pub connection_str: Option<String>,
 
     /// Controls the number of threads establishing connections to
@@ -44,7 +44,7 @@ pub struct GeyserPluginPostgresConfig {
 }
 
 #[derive(Error, Debug)]
-pub enum GeyserPluginPostgresError {
+pub enum GeyserPluginRedisError {
     #[error("Error connecting to the backend data store. Error message: ({msg})")]
     DataStoreConnectionError { msg: String },
 
@@ -55,12 +55,12 @@ pub enum GeyserPluginPostgresError {
     ConfigurationError { msg: String },
 }
 
-impl GeyserPlugin for GeyserPluginPostgres {
+impl GeyserPlugin for GeyserPluginRedis {
     fn name(&self) -> &'static str {
-        "GeyserPluginPostgres"
+        "GeyserPluginRedis"
     }
 
-    /// Do initialization for the PostgreSQL plugin.
+    /// Do initialization for the Redis plugin.
     ///
     /// # Format of the config file:
     /// * The `accounts_selector` section allows the user to controls accounts selections.
@@ -78,21 +78,20 @@ impl GeyserPlugin for GeyserPluginPostgres {
     /// "accounts_selector" : {
     ///     "accounts" : \["*"\],
     /// }
-    /// * "host", optional, specifies the PostgreSQL server.
-    /// * "user", optional, specifies the PostgreSQL user.
-    /// * "port", optional, specifies the PostgreSQL server's port.
-    /// * "connection_str", optional, the custom PostgreSQL connection string.
-    /// Please refer to https://docs.rs/postgres/0.19.2/postgres/config/struct.Config.html for the connection configuration.
+    /// * "host", optional, specifies the Redis server.
+    /// * "user", optional, specifies the Redis user.
+    /// * "port", optional, specifies the Redis server's port.
+    /// * "connection_str", optional, the custom Redis connection string.
     /// When `connection_str` is set, the values in "host", "user" and "port" are ignored. If `connection_str` is not given,
     /// `host` and `user` must be given.
     /// "store_account_historical_data", optional, set it to 'true', to store historical account data to account_audit
     /// table.
     /// * "threads" optional, specifies the number of worker threads for the plugin. A thread
-    /// maintains a PostgreSQL connection to the server. The default is '10'.
+    /// maintains a Redis connection to the server. The default is '10'.
     /// * "batch_size" optional, specifies the batch size of bulk insert when the AccountsDb is created
     /// from restoring a snapshot. The default is '10'.
     /// * "panic_on_db_errors", optional, contols if to panic when there are errors replicating data to the
-    /// PostgreSQL database. The default is 'false'.
+    /// Redis database. The default is 'false'.
     /// * "transaction_selector", optional, controls if and what transaction to store. If this field is missing
     /// None of the transction is stored.
     /// "transaction_selector" : {
@@ -110,7 +109,7 @@ impl GeyserPlugin for GeyserPluginPostgres {
     /// # Examples
     ///
     /// {
-    ///    "libpath": "/home/solana/target/release/libsolana_geyser_plugin_postgres.so",
+    ///    "libpath": "/home/solana/target/release/libsolana_geyser_plugin_redis.so",
     ///    "host": "host_foo",
     ///    "user": "solana",
     ///    "threads": 10,
@@ -133,7 +132,7 @@ impl GeyserPlugin for GeyserPluginPostgres {
         let result: serde_json::Value = serde_json::from_str(&contents).unwrap();
         self.transaction_selector = Some(Self::create_transaction_selector_from_config(&result));
 
-        let config: GeyserPluginPostgresConfig =
+        let config: GeyserPluginRedisConfig =
             serde_json::from_str(&contents).map_err(|err| {
                 GeyserPluginError::ConfigFileReadError {
                     msg: format!(
@@ -144,7 +143,7 @@ impl GeyserPlugin for GeyserPluginPostgres {
             })?;
 
         let (client, batch_optimize_by_skipping_older_slots) =
-            PostgresClientBuilder::build_parallel_postgres_client(&config)?;
+            RedisClientBuilder::build_parallel_redis_client(&config)?;
         self.client = Some(client);
         self.batch_starting_slot = batch_optimize_by_skipping_older_slots;
 
@@ -167,8 +166,8 @@ impl GeyserPlugin for GeyserPluginPostgres {
         match &self.client {
             None => {
                 return Err(GeyserPluginError::Custom(Box::new(
-                    GeyserPluginPostgresError::DataStoreConnectionError {
-                        msg: "There is no connection to the PostgreSQL database.".to_string(),
+                    GeyserPluginRedisError::DataStoreConnectionError {
+                        msg: "There is no connection to the Redis database.".to_string(),
                     },
                 )));
             }
@@ -193,8 +192,8 @@ impl GeyserPlugin for GeyserPluginPostgres {
         match &self.client {
             None => {
                 return Err(GeyserPluginError::Custom(Box::new(
-                    GeyserPluginPostgresError::DataStoreConnectionError {
-                        msg: "There is no connection to the PostgreSQL database.".to_string(),
+                    GeyserPluginRedisError::DataStoreConnectionError {
+                        msg: "There is no connection to the Redis database.".to_string(),
                     },
                 )));
             }
@@ -215,13 +214,13 @@ impl GeyserPlugin for GeyserPluginPostgres {
 
                     if let Err(err) = result {
                         return Err(GeyserPluginError::SlotStatusUpdateError{
-                                msg: format!("Failed to persist the transaction info to the PostgreSQL database. Error: {:?}", err)
+                                msg: format!("Failed to persist the transaction info to the Redis database. Error: {:?}", err)
                             });
                     }
                 }
                 _ => {
                     return Err(GeyserPluginError::SlotStatusUpdateError{
-                        msg: "Failed to persist the transaction info to the PostgreSQL database. Unsupported format.".to_string()
+                        msg: "Failed to persist the transaction info to the Redis database. Unsupported format.".to_string()
                     });
                 }
             },
@@ -245,7 +244,7 @@ impl GeyserPlugin for GeyserPluginPostgres {
     }
 }
 
-impl GeyserPluginPostgres {
+impl GeyserPluginRedis {
     fn create_transaction_selector_from_config(config: &serde_json::Value) -> TransactionSelector {
         let transaction_selector = &config["transaction_selector"];
 
@@ -276,9 +275,9 @@ impl GeyserPluginPostgres {
 #[allow(improper_ctypes_definitions)]
 /// # Safety
 ///
-/// This function returns the GeyserPluginPostgres pointer as trait GeyserPlugin.
+/// This function returns the GeyserPluginRedis pointer as trait GeyserPlugin.
 pub unsafe extern "C" fn _create_plugin() -> *mut dyn GeyserPlugin {
-    let plugin = GeyserPluginPostgres::new();
+    let plugin = GeyserPluginRedis::new();
     let plugin: Box<dyn GeyserPlugin> = Box::new(plugin);
     Box::into_raw(plugin)
 }
