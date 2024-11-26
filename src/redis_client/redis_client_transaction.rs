@@ -79,7 +79,7 @@ pub struct DbTransaction {
     pub meta: DbTransactionStatusMeta,
     pub write_version: i64,
     pub index: i64,
-    pub message_type: u8,
+    pub message_version: Option<u8>,
 }
 
 pub struct LogTransactionRequest {
@@ -370,9 +370,9 @@ fn build_db_transaction(
     DbTransaction {
         signature: bs58::encode(transaction_info.signature.as_ref()).into_string(),
         slot: slot as i64,
-        message_type: match transaction_info.transaction.message() {
-             SanitizedMessage::Legacy(_) => 0,
-             SanitizedMessage::V0(_) => 1,
+        message_version: match transaction_info.transaction.message() {
+             SanitizedMessage::Legacy(_) => None,
+             SanitizedMessage::V0(_) => Some(0),
         },
         message: match transaction_info.transaction.message() {
             SanitizedMessage::Legacy(legacy_message) => {
